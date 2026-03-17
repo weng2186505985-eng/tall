@@ -1,0 +1,37 @@
+# Centralized Configuration for TALL-Swin Deepfake Detection (Memory Optimized)
+
+common:
+  device: "cuda"
+  num_workers: 0
+  seed: 42
+
+paths:
+  dataset_root: "d:/bishe/Yuhonghai/deepfake_detection/data/raw/FaceForensics++_C23"
+  manifest_path: "d:/bishe/Yuhonghai/deepfake_detection/data/processed/dataset_manifest.json"
+  output_dir: "d:/bishe/Yuhonghai/deepfake_detection/data/processed"
+  checkpoint_dir: "checkpoints"
+
+preprocessing:
+  target_fps: 10
+  face_size: [224, 224]
+  limit_videos: 50
+
+model:
+  type: "tall_swin_base"
+  num_classes: 2
+  n_segment: 8       # Reduced from 16 to save memory
+  img_size: 224
+  pretrained: true
+
+meta_learning:
+  n_way: 3           # Reduced from 5 to fit in 6GB
+  k_shot: 1          # 1-shot learning for memory efficiency
+  q_query: 1
+  iterations: 100
+
+training:
+  batch_size: 1      # Process 1 episode at a time
+  epochs: 100
+  lr: 0.00005
+  gamma: 0.5
+  step_size: 20
