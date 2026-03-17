@@ -118,6 +118,14 @@ def train():
             
         # Always save latest for resumption
         torch.save(model.state_dict(), checkpoint_dir / "tall_swin_latest.pth")
+        
+        # 6. Periodic Evaluation (e.g., every 10 epochs)
+        if (epoch + 1) % 10 == 0:
+            print(f"\n--- Running Intermediate Evaluation (Epoch {epoch+1}) ---")
+            from evaluate import evaluate
+            model.eval()
+            evaluate(checkpoint_path=str(checkpoint_dir / "tall_swin_latest.pth"))
+            model.train()
 
 if __name__ == "__main__":
     train()
