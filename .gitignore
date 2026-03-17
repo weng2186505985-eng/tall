@@ -118,6 +118,7 @@ train_log_2.txt
 check_timm_gpu.py
 test_model_gpu.py
 dataset_path.txt
+scripts/download_dataset.py
 
 # IDE
 .vscode/
