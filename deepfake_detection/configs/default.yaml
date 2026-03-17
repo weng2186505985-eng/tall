@@ -1,8 +1,8 @@
-# Centralized Configuration for TALL-Swin Deepfake Detection (Memory Optimized)
+# Centralized Configuration for TALL-Swin Deepfake Detection (RTX 4090 Optimized)
 
 common:
   device: "cuda"
-  num_workers: 0
+  num_workers: 8     # Increased for faster data loading
   seed: 42
 
 paths:
@@ -14,24 +14,24 @@ paths:
 preprocessing:
   target_fps: 10
   face_size: [224, 224]
-  limit_videos: 50
+  limit_videos: -1   # Process all available
 
 model:
   type: "tall_swin_base"
   num_classes: 2
-  n_segment: 8       # Reduced from 16 to save memory
+  n_segment: 16      # Full temporal resolution for Swin-B
   img_size: 224
   pretrained: true
 
 meta_learning:
-  n_way: 3           # Reduced from 5 to fit in 6GB
-  k_shot: 1          # 1-shot learning for memory efficiency
-  q_query: 1
-  iterations: 100
-  eval_iterations: 100 # Ensure consistent evaluation
+  n_way: 5           # Standard 5-way benchmark
+  k_shot: 5          # 5-shot learning for better stability
+  q_query: 15
+  iterations: 500    # Increased for thorough training
+  eval_iterations: 100 
 
 training:
-  batch_size: 1      # Process 1 episode at a time
+  batch_size: 1      # 1 full episode per GPU step (100 samples)
   epochs: 100
   lr: 0.00005
   gamma: 0.5
