@@ -25,7 +25,11 @@ class WeightedFusion(nn.Module):
         # Convert distance to probability (lower distance -> higher sync/higher confidence)
         a_prob = F.softmax(audio_logits, dim=-1) # Placeholder
         
-        normalized_weights = F.softmax(self.weights, dim=0) if self.trainable else self.weights
+        if self.trainable:
+            normalized_weights = F.softmax(self.weights, dim=0)
+        else:
+            # Force normalization for fixed weights
+            normalized_weights = self.weights / (self.weights.sum() + 1e-7)
         
         final_prob = normalized_weights[0] * v_prob + normalized_weights[1] * a_prob
         return final_prob

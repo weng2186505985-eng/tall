@@ -76,6 +76,7 @@ def train():
     model.train()
     checkpoint_dir = Path(config['paths']['checkpoint_dir'])
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    best_loss = float('inf')
 
     for epoch in range(config['training']['epochs']):
         total_loss = 0
@@ -108,8 +109,15 @@ def train():
         avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0
         print(f"Epoch {epoch+1} Average Loss: {avg_loss:.4f}")
         
-        # Save Checkpoint
-        torch.save(model.state_dict(), checkpoint_dir / f"tall_swin_epoch_{epoch+1}.pth")
+        # Save Checkpoint (Keep best and latest to save 30GB+ disk space)
+        is_best = avg_loss < best_loss
+        if is_best:
+            best_loss = avg_loss
+            torch.save(model.state_dict(), checkpoint_dir / "tall_swin_best.pth")
+            print(f"New Best Model Saved (Loss: {best_loss:.4f})")
+            
+        # Always save latest for resumption
+        torch.save(model.state_dict(), checkpoint_dir / "tall_swin_latest.pth")
 
 if __name__ == "__main__":
     train()

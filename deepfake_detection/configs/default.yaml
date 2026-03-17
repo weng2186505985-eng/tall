@@ -28,6 +28,7 @@ meta_learning:
   k_shot: 1          # 1-shot learning for memory efficiency
   q_query: 1
   iterations: 100
+  eval_iterations: 100 # Ensure consistent evaluation
 
 training:
   batch_size: 1      # Process 1 episode at a time

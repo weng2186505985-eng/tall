@@ -1,3 +1,11 @@
+import sys
+import os
+from pathlib import Path
+
+# Add project root to path for absolute imports
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(project_root))
+
 import torch
 import torch.nn as nn
 from deepfake_detection.models.tall_swin import PrototypicalHead, TALLSwin

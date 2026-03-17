@@ -11,7 +11,8 @@ class SyncNet(nn.Module):
         super(SyncNet, self).__init__()
         
         # Visual Stream (CNN for mouth region frames)
-        # Input: (B, 5, 1, 112, 112) - 5 grayscale frames of mouth region
+        # Visual Stream (CNN for mouth region frames)
+        # Input: (B, 1, T, H, W) - Grayscale mouth region frames
         self.visual_stream = nn.Sequential(
             nn.Conv3d(1, 64, kernel_size=(5, 7, 7), stride=(1, 2, 2), padding=(2, 3, 3)),
             nn.BatchNorm3d(64),
