@@ -11,8 +11,9 @@ from data.dataset import FewShotFakeVideoDataset, EpisodeSampler
 from models.tall_swin import TALLSwin
 
 def train():
-    # 1. Load Config
-    config_path = Path(__file__).parent / "configs/default.yaml"
+    # 1. Resolve Project Root and Load Config
+    project_root = Path(__file__).resolve().parent.parent
+    config_path = Path(__file__).resolve().parent / "configs/default.yaml"
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
@@ -23,6 +24,14 @@ def train():
         device = torch.device('cpu')
     else:
         device = torch.device(device_name)
+    
+    # 3. Resolve Relative Paths
+    for key in ['dataset_root', 'manifest_path', 'output_dir', 'checkpoint_dir']:
+        if key in config['paths']:
+            val = config['paths'][key]
+            if not Path(val).is_absolute():
+                config['paths'][key] = str(project_root / val)
+    
     print(f"Using device: {device}")
 
     # 3. Initialize Dataset and Sampler
@@ -59,6 +68,9 @@ def train():
         step_size=config['training']['step_size'], 
         gamma=config['training']['gamma']
     )
+    
+    # Enable Mixed Precision
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == 'cuda'))
 
     # 5. Training Loop
     model.train()
@@ -76,15 +88,18 @@ def train():
             images, labels = batch
             images = images.to(device)
             
-            # Forward in few-shot mode
-            logits = model(images, n_way=n_way, k_shot=k_shot, mode='few_shot')
-            
             # Target labels for query set (0..n_way-1)
             target = torch.arange(n_way).repeat_interleave(q_query).to(device)
             
-            loss = F.cross_entropy(logits, target)
-            loss.backward()
-            optimizer.step()
+            # Forward in few-shot mode with AMP
+            with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
+                logits = model(images, n_way=n_way, k_shot=k_shot, mode='few_shot')
+                loss = F.cross_entropy(logits, target)
+            
+            # Scaled Backward and Step
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             
             total_loss += loss.item()
             pbar.set_postfix(loss=f"{loss.item():.4f}")

@@ -6,9 +6,9 @@ common:
   seed: 42
 
 paths:
-  dataset_root: "d:/bishe/Yuhonghai/deepfake_detection/data/raw/FaceForensics++_C23"
-  manifest_path: "d:/bishe/Yuhonghai/deepfake_detection/data/processed/dataset_manifest.json"
-  output_dir: "d:/bishe/Yuhonghai/deepfake_detection/data/processed"
+  dataset_root: "deepfake_detection/data/raw/FaceForensics++_C23"
+  manifest_path: "deepfake_detection/data/processed/dataset_manifest.json"
+  output_dir: "deepfake_detection/data/processed"
   checkpoint_dir: "checkpoints"
 
 preprocessing:

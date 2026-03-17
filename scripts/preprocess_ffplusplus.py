@@ -148,8 +148,11 @@ class FFPlusPlusPreprocessor:
         self.construct_meta_learning_dataset(all_video_results)
 
 if __name__ == "__main__":
-    DATA_ROOT = "d:/bishe/Yuhonghai/deepfake_detection/data/raw/FaceForensics++_C23" 
-    OUTPUT_ROOT = "d:/bishe/Yuhonghai/deepfake_detection/data/processed"
+    project_root = Path(__file__).resolve().parent.parent
+    
+    # Use relative paths from project root
+    DATA_ROOT = project_root / "deepfake_detection/data/raw/FaceForensics++_C23" 
+    OUTPUT_ROOT = project_root / "deepfake_detection/data/processed"
     
     # Run subset for testing
     preprocessor = FFPlusPlusPreprocessor(DATA_ROOT, OUTPUT_ROOT, limit_videos=10)
