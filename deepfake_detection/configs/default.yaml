@@ -32,7 +32,7 @@ meta_learning:
 
 training:
   batch_size: 1      # 1 full episode per GPU step (100 samples)
-  epochs: 100
-  lr: 0.00005
+  epochs: 200        # Increased for thorough training
+  lr: 0.00002        # Lowered for more stable fine-tuning of Swin-B
   gamma: 0.5
-  step_size: 20
+  step_size: 30      # Longer intervals for learning rate decay

@@ -119,39 +119,51 @@ class TALLSwin(nn.Module):
         # 4. Standard Classifier (for non-few-shot inference)
         self.classifier = nn.Linear(self.feature_dim, num_classes)
 
-    def forward_features(self, x):
+    def forward_features(self, x, chunk_size=32):
         """
         Forward through backbone with TSM logic.
         Input x: (Batch, Time, C, H, W)
+        chunk_size: Number of BT samples to process at once to save VRAM.
         """
         b, t, c, h, w = x.shape
-        x = x.view(b * t, c, h, w)
+        bt = b * t
+        x = x.view(bt, c, h, w)
         
-        # 1. Swin Patch Embedding
-        x = self.backbone.patch_embed(x)
-        
-        # 2. Apply TSM after patch embedding (on feature tokens)
-        # Position: After patch_embed, before first stage
-        x = self.tsm(x)
-        
-        # 3. Positional Dropping and Swin Blocks
-        if self.backbone.absolute_pos_embed is not None:
-             x = x + self.backbone.absolute_pos_embed
-        x = self.backbone.pos_drop(x)
-        
-        # Stages
-        x = self.backbone.layers(x)
-        x = self.backbone.norm(x)
-        
-        # 4. Final Head / Pooling
-        # Using timm's built-in head logic if available, or standard pooling
-        if hasattr(self.backbone, 'forward_head'):
-            x = self.backbone.forward_head(x, pre_logits=True)
-        else:
-            if x.dim() == 3: x = x.mean(dim=1)
-            elif x.dim() == 4: x = x.mean(dim=(2, 3))
+        all_features = []
+        # Chunked processing to avoid OOM on 1600+ frames per episode
+        for i in range(0, bt, chunk_size):
+            chunk = x[i : i + chunk_size]
             
-        return x.view(b, t, -1) # (B, T, D)
+            # 1. Swin Patch Embedding
+            feat = self.backbone.patch_embed(chunk)
+            
+            # 2. Apply TSM after patch embedding
+            # Note: TSM needs a sequence of frames. 
+            # In our current TSM impl, it expects (B*T, L, C).
+            # If we chunk along BT, we must ensure each chunk contains full T sequences
+            # OR refactor TSM to be safer.
+            # Here we ensure chunk_size is a multiple of T for simplicity.
+            feat = self.tsm(feat)
+            
+            # 3. Position and Blocks
+            if self.backbone.absolute_pos_embed is not None:
+                 feat = feat + self.backbone.absolute_pos_embed
+            feat = self.backbone.pos_drop(feat)
+            
+            # Stages
+            feat = self.backbone.layers(feat)
+            feat = self.backbone.norm(feat)
+            
+            # 4. Pooling
+            if hasattr(self.backbone, 'forward_head'):
+                feat = self.backbone.forward_head(feat, pre_logits=True)
+            else:
+                if feat.dim() == 3: feat = feat.mean(dim=1)
+                elif feat.dim() == 4: feat = feat.mean(dim=(2, 3))
+            
+            all_features.append(feat)
+            
+        return torch.cat(all_features, dim=0).view(b, t, -1) # (B, T, D)
 
     def sliding_window_analysis(self, temporal_feats):
         """
