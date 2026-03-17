@@ -184,12 +184,6 @@ class TALLSwin(nn.Module):
         
         # 2. Few-Shot ProtoNet Path
         if mode == 'few_shot':
-            # Verification: Batch volume must match N-way * (K-shot + Q-query)
-            # This protects against index mapping errors when using multi-process DataLoaders.
-            if n_way is not None and k_shot is not None:
-                # We assume q_query is consistent with what the head expects (usually 1 or the remainder)
-                # For safety, we check if the batch size is exactly what ProtoNet expects.
-                pass 
             
             assert n_way is not None and k_shot is not None, "Few-shot mode requires n_way and k_shot"
             

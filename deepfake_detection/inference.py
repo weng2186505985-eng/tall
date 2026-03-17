@@ -1,9 +1,11 @@
 import torch
 import cv2
+from torchvision import transforms
+from PIL import Image
 from models.tall_swin import TALLSwin
 from models.syncnet import SyncNet
 from models.fusion import WeightedFusion
-from data.preprocess import extract_frames, align_face
+from utils.preprocessing import process_single_video
 import shutil
 import os
 
@@ -26,22 +28,48 @@ class InferencePipeline:
         self.fusion = WeightedFusion()
 
     def predict(self, video_path):
-        temp_dir = "temp_inference"
-        os.makedirs(temp_dir, exist_ok=True)
+        temp_dir = Path("temp_inference")
+        temp_dir.mkdir(parents=True, exist_ok=True)
         
-        # 1. Preprocess
-        # extract_frames(video_path, temp_dir) ...
-        # Simplified placeholder for inference logic:
-        # 2. Forward visual
-        dummy_v = torch.randn(1, 8, 3, 112, 112).to(self.device)
-        with torch.no_grad():
-            v_logits = self.visual_model(dummy_v)
+        # 1. Real Preprocessing
+        
+        processed_meta = process_single_video(video_path, temp_dir, target_fps=2, max_frames=8)
+        if not processed_meta or not processed_meta["frame_paths"]:
+            if temp_dir.exists(): shutil.rmtree(temp_dir)
+            return {"error": "No faces detected in video."}
+
+        # 2. Load & Transform Frames
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        
+        frames = []
+        # Sample exactly 8 frames if possible, or repeat
+        paths = sorted(processed_meta["frame_paths"])[:8]
+        for p in paths:
+            img = Image.open(p).convert('RGB')
+            frames.append(transform(img))
             
-        # 3. Decision
+        # Pad if insufficient frames
+        while len(frames) < 8:
+            frames.append(frames[-1] if frames else torch.zeros(3, 224, 224))
+            
+        x = torch.stack(frames).unsqueeze(0).to(self.device) # (1, 8, 3, 224, 224)
+        
+        # 3. Model Forward
+        with torch.no_grad():
+            v_logits, _ = self.visual_model(x)
+            
+        # 4. Decision
         prob = torch.softmax(v_logits, dim=-1)
         fake_prob = prob[0, 1].item()
         
-        shutil.rmtree(temp_dir)
+        # Cleanup
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+            
         return {
             "fake_probability": fake_prob,
             "verdict": "Fake" if fake_prob > 0.5 else "Real"

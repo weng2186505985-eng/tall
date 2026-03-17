@@ -17,81 +17,22 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+from utils.preprocessing import process_single_video
+
 def process_video_worker(video_path, label, fake_type, output_dir, target_fps, max_frames):
     """
-    Worker function for parallel processing. 
-    Instantiates its own cascade classifier to avoid pickling issues.
+    Wrapper for the shared processing logic. 
+    Category is determined here and passed to the utility.
     """
-    video_path = Path(video_path)
-    output_dir = Path(output_dir)
-    video_name = video_path.stem
     category = fake_type if label == 1 else "Original"
-    
-    raw_frames_dir = output_dir / ".temp_frames" / video_name
-    processed_frames_dir = output_dir / category / video_name
-    processed_frames_dir.mkdir(parents=True, exist_ok=True)
-    
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    
-    # --- extract_frames_opencv logic ---
-    raw_frames_dir.mkdir(parents=True, exist_ok=True)
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        return None
-        
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if fps <= 0: fps = 25 
-    if total_frames <= 0: total_frames = 300 
-    
-    interval = max(1, total_frames // max_frames)
-    
-    count = 0
-    success, image = cap.read()
-    frame_idx = 0
-    while success:
-        if count % interval == 0:
-            frame_name = f"frame_{frame_idx:04d}.png"
-            cv2.imwrite(str(raw_frames_dir / frame_name), image)
-            frame_idx += 1
-            if max_frames and frame_idx >= max_frames:
-                break
-        success, image = cap.read()
-        count += 1
-    cap.release()
-    
-    # --- align_and_crop_face logic ---
-    frame_paths = []
-    for frame_file in sorted(raw_frames_dir.glob("*.png")):
-        img = cv2.imread(str(frame_file))
-        if img is not None:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-            if len(faces) > 0:
-                x, y, w, h = max(faces, key=lambda f: f[2]*f[3])
-                face_img = img[y:y+h, x:x+w]
-                face_img = cv2.resize(face_img, (224, 224))
-                save_path = processed_frames_dir / frame_file.name
-                cv2.imwrite(str(save_path), face_img)
-                frame_paths.append(str(save_path))
-    
-    if raw_frames_dir.exists():
-        shutil.rmtree(raw_frames_dir)
-    
-    if not frame_paths:
-        if processed_frames_dir.exists() and not any(processed_frames_dir.iterdir()):
-            processed_frames_dir.rmdir()
-        return None
-
-    return {
-        "video_name": video_name,
-        "label": label,
-        "fake_type": fake_type,
-        "frame_paths": frame_paths
-    }
+    res = process_single_video(video_path, output_dir / category, target_fps, max_frames)
+    if res:
+        res["label"] = label
+        res["fake_type"] = fake_type
+    return res
 
 class FFPlusPlusPreprocessor:
-    def __init__(self, root_dir, output_dir, n_way=5, k_shot=5, q_query=15, limit_videos=None, target_fps=2, max_frames=20, num_workers=2):
+    def __init__(self, root_dir, output_dir, n_way=5, k_shot=5, q_query=15, limit_videos=None, target_fps=2, max_frames=20, num_workers=None):
         self.root_dir = Path(root_dir)
         self.output_dir = Path(output_dir)
         self.n_way = n_way
@@ -100,7 +41,7 @@ class FFPlusPlusPreprocessor:
         self.limit_videos = limit_videos
         self.target_fps = target_fps
         self.max_frames = max_frames
-        self.num_workers = num_workers
+        self.num_workers = num_workers if num_workers else os.cpu_count() or 2
         
         self.fake_types = ["Deepfakes", "Face2Face", "FaceSwap", "NeuralTextures", "FaceShifter", "DeepFakeDetection"]
         self.classes = ["Original"] + self.fake_types
