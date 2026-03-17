@@ -8,7 +8,7 @@ class MAML:
         self.lr_outer = lr_outer
 
     def inner_loop(self, support_data):
-        pass
+        raise NotImplementedError("MAML inner_loop is not yet implemented.")
 
     def outer_loop(self, query_data):
-        pass
+        raise NotImplementedError("MAML outer_loop is not yet implemented.")

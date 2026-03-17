@@ -60,6 +60,8 @@ class PrototypicalHead(nn.Module):
     def __init__(self, feature_dim):
         super(PrototypicalHead, self).__init__()
         self.feature_dim = feature_dim
+        # Learnable temperature scaling
+        self.scale = nn.Parameter(torch.tensor(10.0))
 
     def forward(self, features, n_way, k_shot):
         """
@@ -80,8 +82,8 @@ class PrototypicalHead(nn.Module):
         # Compute Euclidean distance
         dists = torch.pow(query_features.unsqueeze(1) - prototypes.unsqueeze(0), 2).sum(2)
         
-        # Scale distances to prevent vanishing gradients if needed
-        return -dists * 10 
+        # Scale distances to prevent vanishing gradients
+        return -dists * self.scale
 
 # ==========================================
 # TALL-Swin Model
@@ -141,14 +143,13 @@ class TALLSwin(nn.Module):
         x = self.backbone.layers(x)
         x = self.backbone.norm(x)
         
-        # 4. Pooling
-        # Swin usually returns (BT, L, D) or (BT, C, H, W)
-        if len(x.shape) == 3:
-            # (BT, Tokens, Dim) -> (BT, Dim)
-            x = x.mean(1)
-        elif len(x.shape) == 4:
-            # (BT, Dim, H, W) -> (BT, Dim)
-            x = x.mean((2, 3))
+        # 4. Final Head / Pooling
+        # Using timm's built-in head logic if available, or standard pooling
+        if hasattr(self.backbone, 'forward_head'):
+            x = self.backbone.forward_head(x, pre_logits=True)
+        else:
+            if x.dim() == 3: x = x.mean(dim=1)
+            elif x.dim() == 4: x = x.mean(dim=(2, 3))
             
         return x.view(b, t, -1) # (B, T, D)
 
@@ -161,11 +162,18 @@ class TALLSwin(nn.Module):
         scores = []
         
         for i in range(0, t - self.window_size + 1, self.stride):
-            window = temporal_feats[:, i : i + self.window_size].mean(1) # (B, D)
-            logits = self.classifier(window) # (B, num_classes)
+            window = temporal_feats[:, i : i + self.window_size].mean(1)
+            logits = self.classifier(window)
             scores.append(logits)
             
-        return torch.stack(scores, dim=1) # (B, WinCount, num_classes)
+        # Boundary handling: Ensure the very last frames are included if not captured by stride
+        last_start = t - self.window_size
+        if last_start > 0 and (t - self.window_size) % self.stride != 0:
+            window = temporal_feats[:, last_start:].mean(1)
+            logits = self.classifier(window)
+            scores.append(logits)
+            
+        return torch.stack(scores, dim=1)
 
     def forward(self, x, n_way=None, k_shot=None, mode='inference'):
         """
