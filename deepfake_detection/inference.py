@@ -1,7 +1,7 @@
 import torch
 import cv2
-from models.tall_swin import tall_swin_tiny
-from models.syncnet.py import SyncNet
+from models.tall_swin import TALLSwin
+from models.syncnet import SyncNet
 from models.fusion import WeightedFusion
 from data.preprocess import extract_frames, align_face
 import shutil
@@ -12,7 +12,7 @@ class InferencePipeline:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Load Visual Model
-        self.visual_model = tall_swin_tiny().to(self.device)
+        self.visual_model = TALLSwin(n_segment=8, pretrained=False).to(self.device)
         self.visual_model.load_state_dict(torch.load(visual_ckpt, map_location=self.device))
         self.visual_model.eval()
         

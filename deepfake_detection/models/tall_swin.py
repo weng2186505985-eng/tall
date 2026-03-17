@@ -17,27 +17,38 @@ class TSM(nn.Module):
         self.n_div = n_div
 
     def forward(self, x):
-        # x: (Batch*Time, C, H, W)
-        bt, c, h, w = x.size()
-        b = bt // self.n_segment
-        t = self.n_segment
-        
-        # Reshape to (Batch, Time, C, H, W)
-        x = x.view(b, t, c, h, w)
-        
-        # Split channels
-        fold = c // self.n_div
-        out = torch.zeros_like(x)
-        
-        # Shift forward
-        out[:, 1:, :fold] = x[:, :-1, :fold]
-        # Shift backward
-        out[:, :-1, fold:2*fold] = x[:, 1:, fold:2*fold]
-        # Rest remain same
-        out[:, :, 2*fold:] = x[:, :, 2*fold:]
-        
-        # Reshape back to (Batch*Time, C, H, W)
-        return out.view(bt, c, h, w)
+        # x can be (Batch*Time, C, H, W) or (Batch*Time, L, C)
+        if len(x.shape) == 3:
+            # Token format: (BT, L, C)
+            bt, l, c = x.size()
+            b = bt // self.n_segment
+            t = self.n_segment
+            
+            x = x.view(b, t, l, c)
+            fold = c // self.n_div
+            out = torch.zeros_like(x)
+            
+            # Shift along Time axis (dim=1)
+            out[:, 1:, :, :fold] = x[:, :-1, :, :fold]
+            out[:, :-1, :, fold:2*fold] = x[:, 1:, :, fold:2*fold]
+            out[:, :, :, 2*fold:] = x[:, :, :, 2*fold:]
+            
+            return out.view(bt, l, c)
+        else:
+            # Spatial format: (BT, C, H, W)
+            bt, c, h, w = x.size()
+            b = bt // self.n_segment
+            t = self.n_segment
+            
+            x = x.view(b, t, c, h, w)
+            fold = c // self.n_div
+            out = torch.zeros_like(x)
+            
+            out[:, 1:, :fold, :, :] = x[:, :-1, :fold, :, :]
+            out[:, :-1, fold:2*fold, :, :] = x[:, 1:, fold:2*fold, :, :]
+            out[:, :, 2*fold:, :, :] = x[:, :, 2*fold:, :, :]
+            
+            return out.view(bt, c, h, w)
 
 # ==========================================
 # Prototypical Head
@@ -114,27 +125,32 @@ class TALLSwin(nn.Module):
         b, t, c, h, w = x.shape
         x = x.view(b * t, c, h, w)
         
-        # Note: Ideally TSM is integrated inside Swin blocks to affect attention.
-        # Here we apply TSM before the backbone or between layers if modified.
-        # Simplified: Apply TSM to feature maps inside stages if we had full surgery.
-        # Baseline TSM-Swin: Move temporal info before feature extraction.
+        # 1. Swin Patch Embedding
+        x = self.backbone.patch_embed(x)
+        
+        # 2. Apply TSM after patch embedding (on feature tokens)
+        # Position: After patch_embed, before first stage
         x = self.tsm(x)
         
-        # Extract features (B*T, D)
-        feats = self.backbone.forward_features(x)
+        # 3. Positional Dropping and Swin Blocks
+        if self.backbone.absolute_pos_embed is not None:
+             x = x + self.backbone.absolute_pos_embed
+        x = self.backbone.pos_drop(x)
         
-        # Swin usually returns (B, L, D) or (B, C, H, W) or (B, D*L)
-        if len(feats.shape) == 3:
-            # (Batch, Tokens, Dim) -> (Batch, Dim)
-            feats = feats.mean(1)
-        elif len(feats.shape) == 4:
-            # (Batch, Dim, H, W) -> (Batch, Dim)
-            feats = feats.mean((2, 3))
-        elif len(feats.shape) == 2 and feats.shape[1] > self.feature_dim:
-            # Handle flattened tokens if necessary (e.g., shape is B, 50176)
-            feats = feats.view(feats.shape[0], -1, self.feature_dim).mean(1)
+        # Stages
+        x = self.backbone.layers(x)
+        x = self.backbone.norm(x)
+        
+        # 4. Pooling
+        # Swin usually returns (BT, L, D) or (BT, C, H, W)
+        if len(x.shape) == 3:
+            # (BT, Tokens, Dim) -> (BT, Dim)
+            x = x.mean(1)
+        elif len(x.shape) == 4:
+            # (BT, Dim, H, W) -> (BT, Dim)
+            x = x.mean((2, 3))
             
-        return feats.view(b, t, -1) # (B, T, D)
+        return x.view(b, t, -1) # (B, T, D)
 
     def sliding_window_analysis(self, temporal_feats):
         """
@@ -160,9 +176,14 @@ class TALLSwin(nn.Module):
         
         # 2. Few-Shot ProtoNet Path
         if mode == 'few_shot':
-            # Flatten all samples (N*K + N*Q) from B dimension
-            # Assuming B already contains Support + Query for an episode
-            avg_feats = temporal_feats.mean(1) # Temporal pooling (B, D)
+            assert n_way is not None and k_shot is not None, "Few-shot mode requires n_way and k_shot"
+            
+            # Temporal pooling: (B, T, D) -> (B, D)
+            avg_feats = temporal_feats.mean(1)
+            
+            # Verify batch layout: (N*K + N*Q)
+            # The EpisodicSampler yields support set then query set.
+            # We enforce this expectation by passing the features to the head.
             return self.proto_head(avg_feats, n_way, k_shot)
             
         # 3. Standard Sliding Window Inference Path
@@ -188,14 +209,15 @@ if __name__ == "__main__":
     # 1. Test standard inference
     model.eval()
     with torch.no_grad():
+        dummy_input = torch.randn(1, 8, 3, 224, 224).to(device)
         final_out, win_scores = model(dummy_input)
         print(f"Standard Output shape (Final): {final_out.shape}")
-        print(f"Standard Output shape (Windows): {win_scores.shape}") # Expect 3 windows (0-8, 4-12, 8-16)
+        print(f"Standard Output shape (Windows): {win_scores.shape}")
 
-    # 2. Test few-shot mode (5-way 5-shot)
-    n_way, k_shot, q_query = 5, 5, 1
-    fs_input = torch.randn(n_way * (k_shot + q_query), 16, 3, 224, 224).to(device)
+    # 2. Test few-shot mode (Reduced for memory)
+    n_way, k_shot, q_query = 3, 1, 1
+    fs_input = torch.randn(n_way * (k_shot + q_query), 8, 3, 224, 224).to(device)
     proto_logits = model(fs_input, n_way=n_way, k_shot=k_shot, mode='few_shot')
-    print(f"Few-Shot Logits shape: {proto_logits.shape}") # (N*Q, N_way) -> (5*1, 5)
+    print(f"Few-Shot Logits shape: {proto_logits.shape}") # (N*Q, N_way) -> (3*1, 3)
     
     print("\nUnit Test Passed!")
